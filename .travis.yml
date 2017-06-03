@@ -20,6 +20,9 @@ matrix:
       env:
         CC=/usr/bin/gcc-4.9
         CXX=/usr/bin/g++-4.9
+        GPGME_DEBUG=9 
+        AUTOMAKE_VERSION=1.14.1 
+        GETTEXT_VERSION=0.19.3
     - os: osx
       before_install:
         - brew update
