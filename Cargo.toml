@@ -10,6 +10,8 @@ notify = "4.0.0"
 glob = "0.2.11"
 clipboard = "0.3.0"
 gpgme = { git = "https://github.com/johnschug/rust-gpgme", branch = "master" }
+conrod = { version = "0.56.0", features = ["winit", "glium"] }
+
 
 [replace]
 "qml:0.0.9" = { git = 'https://github.com/vandenoever/qml-rust/', branch = "notify"}

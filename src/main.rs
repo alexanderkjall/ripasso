@@ -1,140 +1,16 @@
+#[macro_use]
+extern crate conrod;
+mod pass;
 
-extern crate qml;
-extern crate gpgme;
-
-use qml::*;
 use std::thread;
 use std::sync::mpsc;
 use std::sync::mpsc::{Sender, Receiver};
 use std::sync::{Arc, Mutex};
 use pass::Password;
-mod pass;
-use std::time::Duration;
+
 extern crate clipboard;
-
-use clipboard::{ClipboardProvider, ClipboardContext};
-use std::fs::File;
-
-
-// UI state
-pub struct UI {
-    all_passwords: Arc<Mutex<Vec<Password>>>,
-    current_passwords: Vec<Password>,
-    password: Box<QPasswordView>,
-    passwords: QPasswordEntry,
-}
-
-impl UI {
-    pub fn query(&mut self, query: String) -> Option<&QVariant> {
-        println!("query");
-        let passwords = self.all_passwords.lock().unwrap();
-        fn normalized(s: &String) -> String {
-            s.to_lowercase()
-        };
-        fn matches(s: &String, q: &String) -> bool {
-            normalized(&s).as_str().contains(normalized(&q).as_str())
-        };
-        let matching = passwords.iter().filter(|p| matches(&p.name, &query));
-
-        // Save currently matched passwords
-        self.current_passwords = matching.cloned().collect();
-
-        // Update QML data with currently matched passwords
-        self.passwords.set_data(self.current_passwords
-                                    .clone()
-                                    .into_iter()
-                                    .map(|p| (p.name.clone().into(), p.meta.clone().into()))
-                                    .collect());
-        None
-    }
-
-    fn get_password(&self, i: i32) -> Password {
-        return self.current_passwords[i as usize].clone();
-    }
-
-    pub fn copyToClipboard(&mut self, i: i32) -> Option<&QVariant> {
-        // Open password file
-        let password = self.get_password(i).password().unwrap();
-
-        // Copy password to clipboard
-        let mut ctx: ClipboardContext = ClipboardProvider::new().unwrap();
-        ctx.set_contents(password.to_owned()).unwrap();
-        println!("password copied to clipboard");
-
-        thread::spawn(move || {
-                          thread::sleep(Duration::new(5, 0));
-                          let mut ctx: ClipboardContext = ClipboardProvider::new().unwrap();
-                          ctx.set_contents("".into()).unwrap();
-                          println!("clipoard cleared");
-                      });
-        None
-
-    }
-    pub fn select(&mut self, i: i32) -> Option<&QVariant> {
-        println!("select: {}", i);
-        let pass = self.get_password(i);
-        self.password.set_name(pass.name);
-        self.password.set_meta(pass.meta);
-        None
-    }
-    pub fn add_password(&mut self) -> Option<&QVariant> {
-        None
-    }
-}
-
-Q_OBJECT!(
-pub UI as QUI{
-    signals:
-    slots:
-        fn query(query:String);
-        fn select(i:i32);
-        fn add_password();
-        fn copyToClipboard(i: i32);
-    properties:
-        status: String;
-            read: get_status,
-            write: set_status,
-            notify: status_changed;
-        countdown: f64;
-            read: get_countdown,
-            write: set_countdown,
-            notify: countdown_changed;
-});
-
-// The currently shown password
-pub struct PasswordView;
-Q_OBJECT!(
-pub PasswordView as QPasswordView{
-     signals:
-     slots:
-     properties:
-        cached: bool;
-            read: get_cached,
-            write: set_cached,
-            notify: cached_changed;
-        name: String;
-            read: get_name,
-            write: set_name,
-            notify: name_changed;
-        info: String;
-            read: get_info,
-            write: set_info,
-            notify: info_changed;
-        metadata: String;
-            read: get_meta,
-            write: set_meta,
-            notify: meta_changed;
-}
-);
-
-// Password list
-Q_LISTMODEL!(
-    pub QPasswordEntry{
-        name: String,
-        meta: String
-    }
-);
-
+use conrod::{widget, Positionable, Sizeable, Colorable, Widget};
+use conrod::backend::glium::glium::{self, Surface};
 fn main() {
 
     // Channel for password updates
@@ -146,38 +22,165 @@ fn main() {
     let passwords = Arc::new(Mutex::new(vec![]));
     let p1 = passwords.clone();
     thread::spawn(move || loop {
-        match password_rx.recv() {
-            Ok(p) => {
-                println!("Recieved: {:?}", p.name);
-                let mut passwords = p1.lock().unwrap();
-                passwords.push(p);
-            }
-            Err(e) => {
-                panic!("password reciever channel failed: {:?}", e);
-            },
+                      match password_rx.recv() {
+                          Ok(p) => {
+                              println!("Recieved: {:?}", p.name);
+                              let mut passwords = p1.lock().unwrap();
+                              passwords.push(p);
+                          }
+                          Err(e) => {
+                              panic!("password reciever channel failed: {:?}", e);
+                          }
+                      }
+                  });
+
+    println!("Hello passwords");
+
+    // UI
+    const WIDTH: u32 = 400;
+    const HEIGHT: u32 = 200;
+    let mut events_loop = glium::glutin::EventsLoop::new();
+
+    let window = glium::glutin::WindowBuilder::new()
+        .with_title("Ripasso")
+        .with_dimensions(WIDTH, HEIGHT);
+
+    let context = glium::glutin::ContextBuilder::new()
+        .with_vsync(true)
+        .with_multisampling(4);
+
+    let display = glium::Display::new(window, context, &events_loop).unwrap();
+
+    let mut ui = conrod::UiBuilder::new([WIDTH as f64, HEIGHT as f64]).build();
+
+    widget_ids!(struct Ids { text, password_list, input });
+    let mut ids = Ids::new(ui.widget_id_generator());
+    //ids.passwords.resize(100, &mut ui.widget_id_generator());
+
+    // Add a `Font` to the `Ui`'s `font::Map` from file.
+    const FONT_PATH: &'static str = "/usr/share/fonts/TTF/arial.ttf";
+    ui.fonts.insert_from_file(FONT_PATH).unwrap();
+
+    let mut renderer = conrod::backend::glium::Renderer::new(&display).unwrap();
+
+    // The image map describing each of our widget->image mappings (in our case, none).
+    let image_map = conrod::image::Map::<glium::texture::Texture2d>::new();
+
+
+    let mut events = Vec::new();
+
+    'render: loop {
+        events.clear();
+
+        // Get all the new events since the last frame.
+        events_loop.poll_events(|event| { events.push(event); });
+
+        // If there are no new events, wait for one.
+        if events.is_empty() {
+            events_loop.run_forever(|event| {
+                                        events.push(event);
+                                        glium::glutin::ControlFlow::Break
+                                    });
         }
-    });
 
-    // Set up all the UI stuff
-    let mut engine = QmlEngine::new();
+        fn normalized(s: &String) -> String {
+            s.to_lowercase()
+        };
+        fn matches(s: &String, q: &String) -> bool {
+            normalized(&s).as_str().contains(normalized(&q).as_str())
+        };
 
-    let ui = QUI::new(UI {
-                          all_passwords: passwords.clone(),
-                          current_passwords: Vec::<Password>::new(),
-                          passwords: QPasswordEntry::new(),
-                          password: QPasswordView::new(PasswordView,
-                                                       true,
-                                                       "test".into(),
-                                                       "test".into(),
-                                                       "test".into()),
-                      },
-                      "started".into(),
-                      0.0);
-    let ref passwordsv = ui.passwords;
-    let ref password = ui.password;
-    engine.set_and_store_property("ui", ui.get_qobj());
-    engine.set_and_store_property("passwords", passwordsv);
-    engine.set_and_store_property("password", password.get_qobj());
-    engine.load_file("res/main.qml");
-    engine.exec();
+        let all = passwords.lock().unwrap();
+        let matching = all.iter()
+            .filter(|p| matches(&p.name, &"wrapp".to_string())).collect();
+        // Process the events.
+        for event in events.drain(..) {
+
+            // Break from the loop upon `Escape` or closed window.
+            match event.clone() {
+                glium::glutin::Event::WindowEvent { event, .. } => {
+                    match event {
+                        glium::glutin::WindowEvent::Closed |
+                        glium::glutin::WindowEvent::KeyboardInput {
+                            input: glium::glutin::KeyboardInput {
+                                virtual_keycode: Some(glium::glutin::VirtualKeyCode::Escape), ..
+                            },
+                            ..
+                        } => break 'render,
+                        _ => (),
+                    }
+                }
+                _ => (),
+            };
+
+            // Use the `winit` backend feature to convert the winit event to a conrod input.
+            let input = match conrod::backend::winit::convert_event(event, &display) {
+                None => continue,
+                Some(input) => input,
+            };
+
+            // Handle the input with the `Ui`.
+            ui.handle_event(input);
+            // Set the widgets.
+            //let ui = &mut ui.set_widgets();
+
+        }
+
+
+        set_ui(ui.set_widgets(), matching, &ids);
+
+        // Draw the `Ui` if it has changed.
+        if let Some(primitives) = ui.draw_if_changed() {
+            renderer.fill(&display, primitives, &image_map);
+            let mut target = display.draw();
+            target.clear_color(0.0, 0.0, 0.0, 1.0);
+            renderer.draw(&display, &mut target, &image_map).unwrap();
+            target.finish().unwrap();
+        }
+    }
+
+    fn set_ui(ref mut ui: conrod::UiCell, passwords: Vec<&Password>, ids: &Ids) {
+        widget::text_box::TextBox::new("test")
+            .align_top_of(ui.window)
+            .w_of(ui.window)
+            .h(32.0)
+            .font_size(16)
+            .text_color(conrod::color::WHITE)
+            .color(conrod::color::BLACK)
+            .set(ids.input, ui);
+
+
+        let (mut items, scrollbar ) = widget::List::flow_down(passwords.len())
+            .item_size(30.0)
+            .scrollbar_on_top()
+            .down_from(ids.input, 10.0)
+            .wh_of(ui.window)
+
+            .set(ids.password_list, ui);
+
+        while let Some(item) = items.next(ui){
+            let i = item.i;
+            let pw = passwords[i].clone();
+            let label = pw.name.to_owned();
+            let listItem = widget::Text::new(&label)
+                .color(conrod::color::WHITE)
+                .font_size(16);
+            item.set(listItem, ui);
+        }
+        //ui.change_focus_to(ids.input);
+        if let Some(s) = scrollbar { s.set(ui)}
+        /*
+        for (i, p) in passwords.iter().enumerate() {
+            //println!("Hello: {:?} {:?}", i, p.name);
+            // "Hello World!" in the middle of the screen.
+            widget::Text::new(&p.name.to_owned())
+                .middle_of(ui.window)
+            //.align_middle_x_of(ui.window)
+            //.down(10.0)
+                .color(conrod::color::WHITE)
+                .font_size(32)
+                .set(ids.passwords[i], ui);
+        }
+        */
+    }
 }

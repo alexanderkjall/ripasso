@@ -1,6 +1,7 @@
 extern crate glob;
-use self::glob::glob;
+extern crate gpgme;
 
+use self::glob::glob;
 extern crate notify;
 use self::notify::{RecommendedWatcher, Watcher, RecursiveMode};
 use self::notify::DebouncedEvent::Create;
@@ -13,7 +14,8 @@ use std::thread;
 use std::fs::File;
 
 use std::str;
-use gpgme::{Context, Protocol};
+use self::gpgme::{Context, Protocol};
+
 #[derive(Clone)]
 pub struct Password {
     pub name: String,
