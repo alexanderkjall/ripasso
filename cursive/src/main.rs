@@ -74,10 +74,20 @@ fn copy(ui: &mut Cursive) -> () {
 }
 
 fn open(ui: &mut Cursive) -> () {
-    let password_entry: pass::PasswordEntry = (*ui
+    let password_entry_option: Option<Option<std::rc::Rc<ripasso::pass::PasswordEntry>>> = ui
         .call_on_id("results", |l: &mut SelectView<pass::PasswordEntry>| {
-            l.selection().unwrap()
-        }).unwrap()).clone();
+            l.selection()
+        });
+
+    let password_entry: pass::PasswordEntry = (*(match password_entry_option {
+        Some(level_1) => {
+            match level_1 {
+                Some(level_2) => level_2,
+                None => return
+            }
+        },
+        None => return
+    })).clone();
 
     let password = match password_entry.secret() {
         Ok(p) => p,
