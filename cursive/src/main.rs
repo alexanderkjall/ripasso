@@ -95,7 +95,7 @@ fn open(ui: &mut Cursive) -> () {
     };
     let d =
         Dialog::around(TextArea::new().content(password).with_id("editbox"))
-            .button("Edit", move |s| {
+            .button("Save", move |s| {
                 let new_password = s
                     .call_on_id("editbox", |e: &mut TextArea| {
                         e.get_content().to_string()
@@ -104,7 +104,14 @@ fn open(ui: &mut Cursive) -> () {
                 if let Err(e) = r {
                     errorbox(s, &e)
                 }
-            }).dismiss_button("Ok");
+            })
+            .button("Generate", move |s| {
+                let new_password = ripasso::pass::generate_password(24);
+                s.call_on_id("editbox", |e: &mut TextArea| {
+                    e.set_content(new_password);
+                });
+            })
+            .dismiss_button("Ok");
 
     ui.add_layer(d);
 }
