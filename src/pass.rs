@@ -129,6 +129,10 @@ impl PasswordEntry {
         output.write_all(&ciphertext)?;
         Ok(())
     }
+
+    pub fn delete_file(&self) -> Result<()> {
+        return Ok(std::fs::remove_file(&self.filename)?);
+    }
 }
 
 pub struct Signer {
